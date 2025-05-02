@@ -1,0 +1,366 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Entropy Minigame</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: 'Arial', sans-serif;
+            background-color: #f0f2f5;
+        }
+        .option-canvas, .result-canvas, .selection-canvas {
+            image-rendering: pixelated;
+        }
+        .option-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .player-result {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+        .time-bar {
+            height: 10px;
+            background-color: #ddd;
+            border-radius: 5px;
+            overflow: hidden;
+            margin-top: 10px;
+        }
+        .time-bar-fill {
+            height: 100%;
+            background-color: #4caf50;
+            transition: width linear;
+        }
+        .selection-container {
+            margin-top: 10px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body class="flex items-center justify-center min-h-screen">
+    <div id="opening-screen" class="bg-white p-6 rounded-lg shadow-lg w-full max-w-md">
+        <h1 class="text-2xl font-bold text-center mb-4">Welcome to Entropy Minigame</h1>
+        <p class="text-center mb-4">Rules:</p>
+        <ul class="list-disc list-inside mb-4">
+            <li>Two players take turns selecting one of four 8x4 RGB matrices.</li>
+            <li>Each player selects twice (two rounds).</li>
+            <li>You have 5 seconds per turn to choose a matrix.</li>
+            <li>If you don't select in time, a low-entropy matrix is chosen, likely causing a loss.</li>
+            <li>The goal is to maximize the entropy of your selections.</li>
+            <li>The player with higher total entropy wins!</li>
+        </ul>
+        <p class="text-center mb-4">
+            By playing, you agree to our
+            <a href="https://your-domain.com/terms" target="_blank" class="text-blue-500 underline">Terms & Conditions</a>.
+        </p>
+        <button id="accept-button" class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 w-full">OK</button>
+    </div>
+    <div id="game" class="bg-white p-6 rounded-lg shadow-lg w-full max-w-md hidden">
+        <h1 class="text-2xl font-bold text-center mb-4">Entropy Minigame</h1>
+        <p id="player-number" class="text-center mb-2"></p>
+        <p id="status" class="text-center mb-4">Waiting for second player...</p>
+        <div id="options" class="space-y-4 hidden"></div>
+        <div id="time-bar" class="time-bar hidden">
+            <div id="time-bar-fill" class="time-bar-fill"></div>
+        </div>
+        <div id="selection" class="selection-container hidden">
+            <p id="selection-text"></p>
+            <canvas id="selection-canvas" class="selection-canvas"></canvas>
+        </div>
+        <div id="result" class="hidden mt-4">
+            <h2 class="text-xl font-semibold text-center">Game Result</h2>
+            <div id="final-matrix" class="flex justify-center mb-2"></div>
+            <p id="final-data" class="text-sm break-all"></p>
+            <p id="total-entropy" class="mt-2"></p>
+            <div id="player-results" class="mt-4 space-y-2"></div>
+            <p id="winner" class="mt-4 font-bold text-center"></p>
+            <button id="restart" class="mt-4 bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 w-full">Play Again</button>
+        </div>
+    </div>
+
+    <script>
+        const tg = window.Telegram.WebApp;
+        tg.ready();
+        tg.expand();
+
+        const baseId = tg.initDataUnsafe.user ? tg.initDataUnsafe.user.id : 'guest_' + Math.random().toString(36).substr(2);
+        const playerId = `${baseId}_${Math.random().toString(36).substr(2, 8)}`;
+
+        const ws = new WebSocket('ws://185.69.166.150:8080'); // Update to wss://your-domain.com for production
+        let currentOptions = [];
+        let playerNumber = null;
+        let selectionTimer = null;
+        let selectionsMade = 0; // Track selections by this player
+
+        document.getElementById('accept-button').onclick = () => {
+            document.getElementById('opening-screen').classList.add('hidden');
+            document.getElementById('game').classList.remove('hidden');
+            ws.send(JSON.stringify({ type: 'join', playerId }));
+        };
+
+        ws.onopen = () => {
+            console.log(`Connecting with playerId: ${playerId}`);
+        };
+
+        ws.onmessage = (event) => {
+            const msg = JSON.parse(event.data);
+            switch (msg.type) {
+                case 'waiting':
+                    document.getElementById('status').textContent = 'Waiting for second player...';
+                    document.getElementById('options').classList.add('hidden');
+                    document.getElementById('time-bar').classList.add('hidden');
+                    document.getElementById('selection').classList.add('hidden');
+                    break;
+                case 'start':
+                    playerNumber = msg.playerNumber;
+                    document.getElementById('player-number').textContent = `You are Player ${playerNumber}`;
+                    document.getElementById('status').textContent = `Player ${msg.currentPlayer}, Round ${msg.round}`;
+                    if (msg.lastSelection) {
+                        showSelection(msg.lastSelection.playerNumber, msg.lastSelection.hex, msg.lastSelection.entropy);
+                    } else {
+                        document.getElementById('selection').classList.add('hidden');
+                    }
+                    if (msg.playerId === playerId && selectionsMade < 2) {
+                        displayOptions(msg.options);
+                        startSelectionTimer(5000);
+                    } else {
+                        document.getElementById('options').classList.add('hidden');
+                        document.getElementById('time-bar').classList.add('hidden');
+                        document.getElementById('status').textContent = `Waiting for Player ${msg.currentPlayer}'s turn...`;
+                    }
+                    break;
+                case 'selection':
+                    showSelection(msg.playerNumber, msg.hex, msg.entropy);
+                    startSelectionTimer(5000);
+                    break;
+                case 'result':
+                    showResult(msg);
+                    document.getElementById('time-bar').classList.add('hidden');
+                    document.getElementById('selection').classList.add('hidden');
+                    selectionsMade = 0; // Reset for next game
+                    break;
+                case 'error':
+                    document.getElementById('status').textContent = `Error: ${msg.message}`;
+                    document.getElementById('time-bar').classList.add('hidden');
+                    document.getElementById('selection').classList.add('hidden');
+                    break;
+            }
+        };
+
+        function startSelectionTimer(duration) {
+            clearInterval(selectionTimer);
+            const timeBarFill = document.getElementById('time-bar-fill');
+            document.getElementById('time-bar').classList.remove('hidden');
+            timeBarFill.style.width = '100%';
+            const start = Date.now();
+            selectionTimer = setInterval(() => {
+                const elapsed = Date.now() - start;
+                const remaining = Math.max(0, duration - elapsed);
+                const percent = (remaining / duration) * 100;
+                timeBarFill.style.width = `${percent}%`;
+                if (remaining <= 0) {
+                    clearInterval(selectionTimer);
+                    document.getElementById('time-bar').classList.add('hidden');
+                }
+            }, 50);
+        }
+
+        function generateRandomHex(bytes) {
+            let array = new Uint8Array(bytes);
+            crypto.getRandomValues(array);
+            return Array.from(array).map(b => b.toString(16).padStart(2, '0')).join('');
+        }
+
+        function byteToRGB(byte) {
+            byte = byte % 256;
+            if (byte < 85) {
+                return `rgb(${byte * 3}, 0, 0)`;
+            } else if (byte < 170) {
+                byte -= 85;
+                return `rgb(${(84 - byte) * 3}, ${byte * 3}, 0)`;
+            } else {
+                byte -= 170;
+                return `rgb(0, 255, ${byte * 3})`;
+            }
+        }
+
+        function drawMatrixCanvas(canvas, hex, width, height) {
+            const ctx = canvas.getContext('2d');
+            canvas.width = width;
+            canvas.height = height;
+            const bytes = [];
+            for (let i = 0; i < hex.length; i += 2) {
+                bytes.push(parseInt(hex.slice(i, i + 2), 16));
+            }
+            for (let y = 0; y < height; y++) {
+                for (let x = 0; x < width; x++) {
+                    const byteIndex = y * width + x;
+                    const value = bytes[byteIndex];
+                    ctx.fillStyle = byteToRGB(value);
+                    ctx.fillRect(x, y, 1, 1);
+                }
+            }
+        }
+
+        function displayOptions(options) {
+            currentOptions = options;
+            const optionsDiv = document.getElementById('options');
+            optionsDiv.innerHTML = '';
+            options.forEach(hex => {
+                const optionDiv = document.createElement('div');
+                optionDiv.className = 'option-container bg-gray-100 p-4 rounded hover:bg-gray-200 cursor-pointer';
+                optionDiv.onclick = () => selectOption(hex);
+
+                const canvas = document.createElement('canvas');
+                canvas.className = 'option-canvas';
+                canvas.style.width = '80px';
+                canvas.style.height = '40px';
+                drawMatrixCanvas(canvas, hex, 8, 4);
+                optionDiv.appendChild(canvas);
+
+                optionsDiv.appendChild(optionDiv);
+            });
+            document.getElementById('options').classList.remove('hidden');
+        }
+
+        function selectOption(hex) {
+            clearInterval(selectionTimer);
+            document.getElementById('time-bar').classList.add('hidden');
+            ws.send(JSON.stringify({ type: 'select', playerId, hex }));
+            document.getElementById('options').classList.add('hidden');
+            document.getElementById('status').textContent = 'Waiting for other player...';
+            selectionsMade++;
+        }
+
+        function showSelection(playerNumber, hex, entropy) {
+            const selectionDiv = document.getElementById('selection');
+            const selectionText = document.getElementById('selection-text');
+            const selectionCanvas = document.getElementById('selection-canvas');
+            selectionText.textContent = `Player ${playerNumber} selected (Entropy: ${entropy}%)`;
+            selectionCanvas.style.width = '80px';
+            selectionCanvas.style.height = '40px';
+            drawMatrixCanvas(selectionCanvas, hex, 8, 4);
+            selectionDiv.classList.remove('hidden');
+        }
+
+        function showResult(data) {
+            const { finalData, totalEntropy, player1Entropy, player2Entropy, winner, players } = data;
+
+            const finalMatrixDiv = document.getElementById('final-matrix');
+            const finalCanvas = document.createElement('canvas');
+            finalCanvas.className = 'result-canvas';
+            finalCanvas.style.width = '160px';
+            finalCanvas.style.height = '80px';
+            drawMatrixCanvas(finalCanvas, finalData, 16, 8);
+            finalMatrixDiv.appendChild(finalCanvas);
+
+            const playerResultsDiv = document.getElementById('player-results');
+            playerResultsDiv.innerHTML = '';
+            [1, 2].forEach(player => {
+                const div = document.createElement('div');
+                div.className = 'player-result';
+                const entropyPercent = player === 1 ? player1Entropy : player2Entropy;
+                div.innerHTML = `<strong>Player ${player}:</strong> ${entropyPercent}% entropy`;
+                players[player].forEach(hex => {
+                    const canvas = document.createElement('canvas');
+                    canvas.className = 'option-canvas';
+                    canvas.style.width = '40px';
+                    canvas.style.height = '20px';
+                    drawMatrixCanvas(canvas, hex, 8, 4);
+                    div.appendChild(canvas);
+                });
+                playerResultsDiv.appendChild(div);
+            });
+
+            document.getElementById('options').classList.add('hidden');
+            document.getElementById('status').classList.add('hidden');
+            document.getElementById('result').classList.remove('hidden');
+            document.getElementById('final-data').textContent = `Final 128-byte Data: ${finalData}`;
+            document.getElementById('total-entropy').textContent = `Total Entropy: ${totalEntropy}% of maximum`;
+            document.getElementById('winner').textContent = winner;
+
+            tg.sendData(JSON.stringify({
+                finalData,
+                totalEntropy,
+                player1Entropy,
+                player2Entropy,
+                winner
+            }));
+        }
+
+        document.getElementById('restart').onclick = () => {
+            ws.send(JSON.stringify({ type: 'join', playerId }));
+            document.getElementById('options').classList.add('hidden');
+            document.getElementById('result').classList.add('hidden');
+            document.getElementById('selection').classList.add('hidden');
+            document.getElementById('status').classList.remove('hidden');
+            document.getElementById('status').textContent = 'Waiting for second player...';
+            document.getElementById('final-matrix').innerHTML = '';
+            document.getElementById('player-results').innerHTML = '';
+            selectionsMade = 0;
+        };
+
+        tg.MainButton.setText('Submit Game');
+        tg.MainButton.show();
+        tg.MainButton.onClick = () => {
+            if (document.getElementById('result').classList.contains('hidden')) return;
+            const finalData = document.getElementById('final-data').textContent.replace('Final 128-byte Data: ', '');
+            const totalEntropy = document.getElementById('total-entropy').textContent.replace('Total Entropy: ', '').replace('% of maximum', '');
+            const player1Entropy = document.querySelector('#player-results .player-result:nth-child(1)').textContent.match(/(\d+\.\d+)%/)[1];
+            const player2Entropy = document.querySelector('#player-results .player-result:nth-child(2)').textContent.match(/(\d+\.\d+)%/)[1];
+            const winner = document.getElementById('winner').textContent;
+            tg.sendData(JSON.stringify({
+                finalData,
+                totalEntropy,
+                player1Entropy,
+                player2Entropy,
+                winner
+            }));
+        };
+    </script>
+</body>
+</html>

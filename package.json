@@ -1,0 +1,12 @@
+{
+    "name": "entropy-minigame-server",
+    "version": "1.0.0",
+    "description": "Server for Entropy Telegram minigame",
+    "main": "server.js",
+    "scripts": {
+        "start": "node server.js"
+    },
+    "dependencies": {
+        "ws": "^8.18.0"
+    }
+}
