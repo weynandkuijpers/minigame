@@ -86,7 +86,7 @@
         <h1 class="text-2xl font-bold text-center mb-4">Welcome to Night Security Entropy Creator</h1>
         <p class="text-center mb-4">Rules:</p>
         <ul class="list-disc list-inside mb-4">
-            <li>Two players take turns selecting one of four 8x4 RGB matrices.</li>
+            <li>Two players take turns selecting one of four 8x4 matrices.</li>
             <li>Each player selects twice (two rounds).</li>
             <li>You have 5 seconds per turn to choose a matrix.</li>
             <li>If you don't select in time, a low-entropy matrix is chosen, likely causing a loss.</li>
@@ -217,16 +217,8 @@
         }
 
         function byteToRGB(byte) {
-            byte = byte % 256;
-            if (byte < 85) {
-                return `rgb(${byte * 3}, 0, 0)`;
-            } else if (byte < 170) {
-                byte -= 85;
-                return `rgb(${(84 - byte) * 3}, ${byte * 3}, 0)`;
-            } else {
-                byte -= 170;
-                return `rgb(0, 255, ${byte * 3})`;
-            }
+            // Map byte value (0-255) to grayscale
+            return `rgb(${byte}, ${byte}, ${byte})`;
         }
 
         function drawMatrixCanvas(canvas, hex, width, height) {
