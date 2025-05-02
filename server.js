@@ -2,7 +2,7 @@ const WebSocket = require('ws');
 const crypto = require('crypto');
 const fs = require('fs').promises;
 
-const PUBLIC_IP = '185.69.166.150'; // Replace with your server's public IPv4 address
+const PUBLIC_IP = '185.69.166.150'; // Updated server public IPv4 address
 const PORT = 8080; // Use 443 for WSS in production
 const SELECTION_TIMEOUT = 5000; // 5 seconds for selection
 const FINAL_DISPLAY_PHASE = 5000; // 5 seconds for final selection display
@@ -35,6 +35,23 @@ function calculateShannonEntropy(str) {
     return entropy;
 }
 
+function sanitizeFilename(name) {
+    // Replace invalid filename characters with underscores
+    return name.replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, '_');
+}
+
+async function writePlayerEntropyFile(player1Name, player2Name, finalData) {
+    const sanitizedPlayer1 = sanitizeFilename(player1Name);
+    const sanitizedPlayer2 = sanitizeFilename(player2Name);
+    const filename = `${sanitizedPlayer1}_${sanitizedPlayer2}_entropy.txt`;
+    try {
+        await fs.writeFile(filename, finalData);
+        console.log(`Wrote final object to ${filename}`);
+    } catch (e) {
+        console.error(`Error writing to ${filename}: ${e.message}`);
+    }
+}
+
 async function appendFinalObject(finalData) {
     try {
         await fs.appendFile(OUTPUT_FILE, finalData + '\n');
@@ -53,7 +70,7 @@ wss.on('connection', (ws) => {
             console.log(`Received message: ${JSON.stringify(msg)}`);
             switch (msg.type) {
                 case 'join':
-                    handleJoin(ws, msg.playerId);
+                    handleJoin(ws, msg.playerId, msg.playerName);
                     break;
                 case 'select':
                     handleSelect(ws, msg.playerId, msg.hex);
@@ -87,8 +104,8 @@ wss.on('connection', (ws) => {
     });
 });
 
-function handleJoin(ws, playerId) {
-    console.log(`Join attempt by playerId: ${playerId}`);
+function handleJoin(ws, playerId, playerName) {
+    console.log(`Join attempt by playerId: ${playerId}, playerName: ${playerName}`);
 
     if (waitingPlayer && waitingPlayer.playerId === playerId) {
         console.log(`Rejected: Player ${playerId} already waiting`);
@@ -103,12 +120,13 @@ function handleJoin(ws, playerId) {
         }
     }
 
+    const name = playerName || playerId; // Fallback to playerId if no name
     if (waitingPlayer) {
         const gameId = crypto.randomBytes(16).toString('hex');
         games[gameId] = {
             players: [
-                { id: waitingPlayer.playerId, ws: waitingPlayer.ws, number: 1 },
-                { id: playerId, ws, number: 2 }
+                { id: waitingPlayer.playerId, name: waitingPlayer.playerName, ws: waitingPlayer.ws, number: 1 },
+                { id: playerId, name, ws, number: 2 }
             ],
             state: {
                 round: 1,
@@ -119,13 +137,13 @@ function handleJoin(ws, playerId) {
             lastSelection: null,
             timer: null
         };
-        console.log(`Game ${gameId} started with players: ${games[gameId].players.map(p => `Player ${p.number} (${p.id})`).join(', ')}`);
+        console.log(`Game ${gameId} started with players: ${games[gameId].players.map(p => `Player ${p.number} (${p.id}, ${p.name})`).join(', ')}`);
         startTurn(gameId);
         waitingPlayer = null;
     } else {
-        waitingPlayer = { playerId, ws };
+        waitingPlayer = { playerId, playerName: name, ws };
         ws.send(JSON.stringify({ type: 'waiting' }));
-        console.log(`Player ${playerId} is waiting for second player`);
+        console.log(`Player ${playerId} (${name}) is waiting for second player`);
     }
 }
 
@@ -133,7 +151,6 @@ function startTurn(gameId) {
     const game = games[gameId];
     if (!game) return;
 
-    // Prevent starting a turn if game is complete
     if (game.state.selections[1].length >= 2 && game.state.selections[2].length >= 2) {
         console.log(`Game ${gameId} is complete, skipping startTurn`);
         return;
@@ -217,14 +234,12 @@ function handleSelect(ws, playerId, hex) {
         startTurn(gameId);
     } else {
         if (game.state.selections[2].length < 2) {
-            // Player 2's first selection, move to Player 1's second round
             game.state.currentPlayer = 1;
             game.state.round = 2;
             game.options = Array(4).fill().map(() => generateRandomHex(32));
             startTurn(gameId);
         } else {
-            // Player 2's second selection, end game
-            clearTimeout(game.timer); // Ensure no pending timers
+            clearTimeout(game.timer);
             game.players.forEach(player => {
                 if (player.ws.readyState === WebSocket.OPEN) {
                     player.ws.send(JSON.stringify({
@@ -261,6 +276,7 @@ function handleSelect(ws, playerId, hex) {
                 const winner = player1Entropy > player2Entropy ? 'Player 1 wins!' :
                                player2Entropy > player1Entropy ? 'Player 2 wins!' : 'It\'s a tie!';
 
+                await writePlayerEntropyFile(game.players[0].name, game.players[1].name, finalData);
                 await appendFinalObject(finalData);
 
                 game.players.forEach(player => {

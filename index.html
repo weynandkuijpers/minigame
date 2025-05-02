@@ -42,7 +42,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Entropy Minigame</title>
+    <title>Night Security Entropy Creator</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
@@ -83,7 +83,7 @@
 </head>
 <body class="flex items-center justify-center min-h-screen">
     <div id="opening-screen" class="bg-white p-6 rounded-lg shadow-lg w-full max-w-md">
-        <h1 class="text-2xl font-bold text-center mb-4">Welcome to Entropy Minigame</h1>
+        <h1 class="text-2xl font-bold text-center mb-4">Welcome to Night Security Entropy Creator</h1>
         <p class="text-center mb-4">Rules:</p>
         <ul class="list-disc list-inside mb-4">
             <li>Two players take turns selecting one of four 8x4 RGB matrices.</li>
@@ -100,7 +100,7 @@
         <button id="accept-button" class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 w-full">OK</button>
     </div>
     <div id="game" class="bg-white p-6 rounded-lg shadow-lg w-full max-w-md hidden">
-        <h1 class="text-2xl font-bold text-center mb-4">Entropy Minigame</h1>
+        <h1 class="text-2xl font-bold text-center mb-4">Night Security Entropy Creator</h1>
         <p id="player-number" class="text-center mb-2"></p>
         <p id="status" class="text-center mb-4">Waiting for second player...</p>
         <div id="options" class="space-y-4 hidden"></div>
@@ -129,21 +129,22 @@
 
         const baseId = tg.initDataUnsafe.user ? tg.initDataUnsafe.user.id : 'guest_' + Math.random().toString(36).substr(2);
         const playerId = `${baseId}_${Math.random().toString(36).substr(2, 8)}`;
+        const playerName = tg.initDataUnsafe.user ? (tg.initDataUnsafe.user.first_name || tg.initDataUnsafe.user.username || playerId) : playerId;
 
         const ws = new WebSocket('ws://185.69.166.150:8080'); // Update to wss://your-domain.com for production
         let currentOptions = [];
         let playerNumber = null;
         let selectionTimer = null;
-        let selectionsMade = 0; // Track selections by this player
+        let selectionsMade = 0;
 
         document.getElementById('accept-button').onclick = () => {
             document.getElementById('opening-screen').classList.add('hidden');
             document.getElementById('game').classList.remove('hidden');
-            ws.send(JSON.stringify({ type: 'join', playerId }));
+            ws.send(JSON.stringify({ type: 'join', playerId, playerName }));
         };
 
         ws.onopen = () => {
-            console.log(`Connecting with playerId: ${playerId}`);
+            console.log(`Connecting with playerId: ${playerId}, playerName: ${playerName}`);
         };
 
         ws.onmessage = (event) => {
@@ -181,7 +182,7 @@
                     showResult(msg);
                     document.getElementById('time-bar').classList.add('hidden');
                     document.getElementById('selection').classList.add('hidden');
-                    selectionsMade = 0; // Reset for next game
+                    selectionsMade = 0;
                     break;
                 case 'error':
                     document.getElementById('status').textContent = `Error: ${msg.message}`;
@@ -333,7 +334,7 @@
         }
 
         document.getElementById('restart').onclick = () => {
-            ws.send(JSON.stringify({ type: 'join', playerId }));
+            ws.send(JSON.stringify({ type: 'join', playerId, playerName }));
             document.getElementById('options').classList.add('hidden');
             document.getElementById('result').classList.add('hidden');
             document.getElementById('selection').classList.add('hidden');
