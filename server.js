@@ -2,10 +2,9 @@ const WebSocket = require('ws');
 const crypto = require('crypto');
 const fs = require('fs').promises;
 
-const PUBLIC_IP = '185.69.166.150'; // Updated server public IPv4 address
+const PUBLIC_IP = '185.69.166.150'; // Server public IPv4 address
 const PORT = 8080; // Use 443 for WSS in production
 const SELECTION_TIMEOUT = 5000; // 5 seconds for selection
-const FINAL_DISPLAY_PHASE = 5000; // 5 seconds for final selection display
 
 const wss = new WebSocket.Server({ host: PUBLIC_IP, port: PORT });
 
@@ -36,7 +35,6 @@ function calculateShannonEntropy(str) {
 }
 
 function sanitizeFilename(name) {
-    // Replace invalid filename characters with underscores
     return name.replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, '_');
 }
 
@@ -120,7 +118,7 @@ function handleJoin(ws, playerId, playerName) {
         }
     }
 
-    const name = playerName || playerId; // Fallback to playerId if no name
+    const name = playerName || playerId;
     if (waitingPlayer) {
         const gameId = crypto.randomBytes(16).toString('hex');
         games[gameId] = {
@@ -234,12 +232,10 @@ function handleSelect(ws, playerId, hex) {
         startTurn(gameId);
     } else {
         if (game.state.selections[2].length < 2) {
+            // Player 2's first selection, move to Player 1's second round
             game.state.currentPlayer = 1;
             game.state.round = 2;
             game.options = Array(4).fill().map(() => generateRandomHex(32));
-            startTurn(gameId);
-        } else {
-            clearTimeout(game.timer);
             game.players.forEach(player => {
                 if (player.ws.readyState === WebSocket.OPEN) {
                     player.ws.send(JSON.stringify({
@@ -250,52 +246,50 @@ function handleSelect(ws, playerId, hex) {
                     }));
                 }
             });
+            startTurn(gameId);
+        } else {
+            // Player 2's second selection, go directly to result
+            clearTimeout(game.timer);
+            const finalData = [
+                game.state.selections[1][0],
+                game.state.selections[2][0],
+                game.state.selections[1][1],
+                game.state.selections[2][1]
+            ].join('');
+            if (finalData.length !== 256) {
+                console.error(`Final data length error: ${finalData.length} hex chars`);
+            }
+            const maxEntropy = 4;
+            const totalEntropy = calculateShannonEntropy(finalData);
+            const totalEntropyPercent = (totalEntropy / maxEntropy * 100).toFixed(2);
+            const player1Data = game.state.selections[1].join('');
+            const player2Data = game.state.selections[2].join('');
+            const player1Entropy = calculateShannonEntropy(player1Data);
+            const player2Entropy = calculateShannonEntropy(player2Data);
+            const player1EntropyPercent = (player1Entropy / maxEntropy * 100).toFixed(2);
+            const player2EntropyPercent = (player2Entropy / maxEntropy * 100).toFixed(2);
+            const winner = player1Entropy > player2Entropy ? 'Player 1 wins!' :
+                           player2Entropy > player1Entropy ? 'Player 2 wins!' : 'It\'s a tie!';
 
-            setTimeout(async () => {
-                const game = games[gameId];
-                if (!game) return;
-
-                const finalData = [
-                    game.state.selections[1][0],
-                    game.state.selections[2][0],
-                    game.state.selections[1][1],
-                    game.state.selections[2][1]
-                ].join('');
-                if (finalData.length !== 256) {
-                    console.error(`Final data length error: ${finalData.length} hex chars`);
-                }
-                const maxEntropy = 4;
-                const totalEntropy = calculateShannonEntropy(finalData);
-                const totalEntropyPercent = (totalEntropy / maxEntropy * 100).toFixed(2);
-                const player1Data = game.state.selections[1].join('');
-                const player2Data = game.state.selections[2].join('');
-                const player1Entropy = calculateShannonEntropy(player1Data);
-                const player2Entropy = calculateShannonEntropy(player2Data);
-                const player1EntropyPercent = (player1Entropy / maxEntropy * 100).toFixed(2);
-                const player2EntropyPercent = (player2Entropy / maxEntropy * 100).toFixed(2);
-                const winner = player1Entropy > player2Entropy ? 'Player 1 wins!' :
-                               player2Entropy > player1Entropy ? 'Player 2 wins!' : 'It\'s a tie!';
-
-                await writePlayerEntropyFile(game.players[0].name, game.players[1].name, finalData);
-                await appendFinalObject(finalData);
-
-                game.players.forEach(player => {
-                    if (player.ws.readyState === WebSocket.OPEN) {
-                        player.ws.send(JSON.stringify({
-                            type: 'result',
-                            finalData,
-                            totalEntropy: totalEntropyPercent,
-                            player1Entropy: player1EntropyPercent,
-                            player2Entropy: player2EntropyPercent,
-                            winner,
-                            players: game.state.selections
-                        }));
-                    }
+            writePlayerEntropyFile(game.players[0].name, game.players[1].name, finalData).then(() => {
+                appendFinalObject(finalData).then(() => {
+                    game.players.forEach(player => {
+                        if (player.ws.readyState === WebSocket.OPEN) {
+                            player.ws.send(JSON.stringify({
+                                type: 'result',
+                                finalData,
+                                totalEntropy: totalEntropyPercent,
+                                player1Entropy: player1EntropyPercent,
+                                player2Entropy: player2EntropyPercent,
+                                winner,
+                                players: game.state.selections
+                            }));
+                        }
+                    });
+                    console.log(`Game ${gameId} ended. Winner: ${winner}`);
+                    delete games[gameId];
                 });
-                console.log(`Game ${gameId} ended. Winner: ${winner}`);
-
-                delete games[gameId];
-            }, FINAL_DISPLAY_PHASE);
+            });
         }
     }
 }
