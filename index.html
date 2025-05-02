@@ -42,7 +42,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Night Security Entropy Creator</title>
+    <title>Night Security Key Creator</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
@@ -114,10 +114,10 @@
             By playing, you agree to our
             <a href="https://your-domain.com/terms" target="_blank" class="text-blue-500 underline">Terms & Conditions</a>.
         </p>
-        <button id="accept-button" class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 w-full">OK</button>
+        <button id="accept-button" class="bg-black-500 text-white px-4 py-2 rounded hover:bg-blue-600 w-full">OK</button>
     </div>
     <div id="game" class="bg-white p-6 rounded-lg shadow-lg w-full max-w-md hidden">
-        <h1 class="text-2xl font-bold text-center mb-4">Night Security Entropy Creator</h1>
+        <h1 class="text-2xl font-bold text-center mb-4">Night Security Key Creator</h1>
         <p id="player-number" class="text-center mb-2"></p>
         <p id="status" class="text-center mb-4">Waiting for second player...</p>
         <div id="options" class="space-y-4 hidden"></div>
@@ -290,7 +290,7 @@
             const selectionDiv = document.getElementById('selection');
             const selectionText = document.getElementById('selection-text');
             const selectionCanvas = document.getElementById('selection-canvas');
-            selectionText.textContent = `Player ${playerNumber} selected (Entropy: ${entropy}%)`;
+            selectionText.textContent = `Player ${playerNumber} selected (Key: ${entropy}%)`;
             selectionCanvas.style.width = '80px';
             selectionCanvas.style.height = '40px';
             drawMatrixCanvas(selectionCanvas, hex, 8, 4);
@@ -330,7 +330,7 @@
             document.getElementById('status').classList.add('hidden');
             document.getElementById('result').classList.remove('hidden');
             document.getElementById('final-data').textContent = `Final 128-byte Data: ${finalData}`;
-            document.getElementById('total-entropy').textContent = `Total Entropy: ${totalEntropy}% of maximum`;
+            document.getElementById('total-entropy').textContent = `Total Key: ${totalEntropy}% of maximum`;
             document.getElementById('winner').textContent = winner;
 
             tg.sendData(JSON.stringify({
