@@ -10,7 +10,7 @@ const FINAL_DISPLAY_PHASE = 5000; // 5 seconds for final selection display
 const wss = new WebSocket.Server({ host: PUBLIC_IP, port: PORT });
 
 const games = {};
-let waitingPlayer = niull;
+let waitingPlayer = null;
 const OUTPUT_FILE = 'final_objects.txt';
 
 function generateRandomHex(bytes) {
