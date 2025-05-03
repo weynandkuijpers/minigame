@@ -2,7 +2,8 @@ const WebSocket = require('ws');
 const crypto = require('crypto');
 const fs = require('fs').promises;
 
-const PUBLIC_IP = '185.69.166.150'; // Server public IPv4 address
+// const PUBLIC_IP = '185.69.166.150'; // Server public IPv4 address
+const PUBLIC_IP = 'localhost'; // Server public IPv4 address
 const PORT = 8080; // Use 443 for WSS in production
 const SELECTION_TIMEOUT = 5000; // 5 seconds for selection
 
@@ -36,6 +37,25 @@ function calculateShannonEntropy(str) {
 
 function sanitizeFilename(name) {
     return name.replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, '_');
+}
+
+function getTriangleBytes(hex) {
+    const bytes = [];
+    for (let i = 0; i < hex.length; i += 2) {
+        bytes.push(parseInt(hex.slice(i, i + 2), 16));
+    }
+    // Assume 8x8 matrix, 32 bytes, each byte assigned to a triangle
+    const triangleData = { topLeft: [], topRight: [], bottomLeft: [], bottomRight: [] };
+    for (let i = 0; i < 64; i++) {
+        const byteIndex = Math.floor(i / 4); // Cycle through 32 bytes
+        if (byteIndex >= bytes.length) break;
+        const triangle = i % 4;
+        if (triangle === 0) triangleData.topLeft.push(bytes[byteIndex]);
+        else if (triangle === 1) triangleData.topRight.push(bytes[byteIndex]);
+        else if (triangle === 2) triangleData.bottomLeft.push(bytes[byteIndex]);
+        else triangleData.bottomRight.push(bytes[byteIndex]);
+    }
+    return triangleData;
 }
 
 async function writePlayerEntropyFile(player1Name, player2Name, finalData) {
@@ -218,8 +238,21 @@ function handleSelect(ws, playerId, hex) {
     console.log(`Player ${currentPlayer} (${playerId}) selected in game ${gameId}, round ${game.state.round}, selections: P1=${game.state.selections[1].length}, P2=${game.state.selections[2].length}`);
 
     const maxEntropy = 4;
-    const selectionEntropy = calculateShannonEntropy(hex);
-    const selectionEntropyPercent = (selectionEntropy / maxEntropy * 100).toFixed(2);
+    let selectionEntropy = calculateShannonEntropy(hex);
+    let selectionEntropyPercent = (selectionEntropy / maxEntropy * 100).toFixed(2);
+
+    // Check for triangle match bonus
+    if (game.state.selections[currentPlayer].length === 2) {
+        const firstSelection = game.state.selections[currentPlayer][0];
+        const secondSelection = hex;
+        const firstTriangles = getTriangleBytes(firstSelection);
+        const secondTriangles = getTriangleBytes(secondSelection);
+        if (firstTriangles.bottomLeft[0] === secondTriangles.topRight[0]) {
+            selectionEntropyPercent = (parseFloat(selectionEntropyPercent) * 1.1).toFixed(2);
+            console.log(`Player ${currentPlayer} earned 10% bonus for matching bottom-left and top-right triangles`);
+        }
+    }
+
     game.lastSelection = {
         playerNumber: currentPlayer,
         hex,
@@ -232,7 +265,6 @@ function handleSelect(ws, playerId, hex) {
         startTurn(gameId);
     } else {
         if (game.state.selections[2].length < 2) {
-            // Player 2's first selection, move to Player 1's second round
             game.state.currentPlayer = 1;
             game.state.round = 2;
             game.options = Array(4).fill().map(() => generateRandomHex(32));
@@ -248,7 +280,6 @@ function handleSelect(ws, playerId, hex) {
             });
             startTurn(gameId);
         } else {
-            // Player 2's second selection, go directly to result
             clearTimeout(game.timer);
             const finalData = [
                 game.state.selections[1][0],
@@ -264,12 +295,27 @@ function handleSelect(ws, playerId, hex) {
             const totalEntropyPercent = (totalEntropy / maxEntropy * 100).toFixed(2);
             const player1Data = game.state.selections[1].join('');
             const player2Data = game.state.selections[2].join('');
-            const player1Entropy = calculateShannonEntropy(player1Data);
-            const player2Entropy = calculateShannonEntropy(player2Data);
-            const player1EntropyPercent = (player1Entropy / maxEntropy * 100).toFixed(2);
-            const player2EntropyPercent = (player2Entropy / maxEntropy * 100).toFixed(2);
-            const winner = player1Entropy > player2Entropy ? 'Player 1 wins!' :
-                           player2Entropy > player1Entropy ? 'Player 2 wins!' : 'It\'s a tie!';
+            let player1Entropy = calculateShannonEntropy(player1Data);
+            let player2Entropy = calculateShannonEntropy(player2Data);
+            let player1EntropyPercent = (player1Entropy / maxEntropy * 100).toFixed(2);
+            let player2EntropyPercent = (player2Entropy / maxEntropy * 100).toFixed(2);
+
+            // Apply triangle match bonus for final entropy
+            const first1Triangles = getTriangleBytes(game.state.selections[1][0]);
+            const second1Triangles = getTriangleBytes(game.state.selections[1][1]);
+            if (first1Triangles.bottomLeft[0] === second1Triangles.topRight[0]) {
+                player1EntropyPercent = (parseFloat(player1EntropyPercent) * 1.1).toFixed(2);
+                console.log(`Player 1 earned 10% bonus for matching triangles`);
+            }
+            const first2Triangles = getTriangleBytes(game.state.selections[2][0]);
+            const second2Triangles = getTriangleBytes(game.state.selections[2][1]);
+            if (first2Triangles.bottomLeft[0] === second2Triangles.topRight[0]) {
+                player2EntropyPercent = (parseFloat(player2EntropyPercent) * 1.1).toFixed(2);
+                console.log(`Player 2 earned 10% bonus for matching triangles`);
+            }
+
+            const winner = parseFloat(player1EntropyPercent) > parseFloat(player2EntropyPercent) ? 'Player 1 wins!' :
+                           parseFloat(player2EntropyPercent) > parseFloat(player1EntropyPercent) ? 'Player 2 wins!' : 'It\'s a tie!';
 
             writePlayerEntropyFile(game.players[0].name, game.players[1].name, finalData).then(() => {
                 appendFinalObject(finalData).then(() => {

@@ -42,7 +42,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Night Security Key Creator</title>
+    <title>Night Security Entropy Creator</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
@@ -90,24 +90,32 @@
         }
         #game {
             position: relative;
-            background-image: url('background-scaled.png');
+            background-image: url('background-placeholder.jpg');
             background-size: cover;
             background-position: center;
             background-repeat: no-repeat;
+        }
+        .entropy-indicator {
+            box-shadow: 0 0 5px 2px rgba(255, 215, 0, 0.3);
+            transition: box-shadow 0.3s ease;
+        }
+        .entropy-indicator.off {
+            box-shadow: none;
         }
     </style>
 </head>
 <body class="flex items-center justify-center min-h-screen">
     <div id="opening-screen" class="bg-white p-6 rounded-lg shadow-lg w-full max-w-md">
-        <img src="brand-scaled.png" alt="Night Security Key Creator Logo" class="logo">
-        <h1 class="text-2xl font-bold text-center mb-4">Welcome to Night Security Key Creator</h1>
+        <img src="logo-placeholder.png" alt="Night Security Entropy Creator Logo" class="logo">
+        <h1 class="text-2xl font-bold text-center mb-4">Welcome to Night Security Entropy Creator</h1>
         <p class="text-center mb-4">Rules:</p>
         <ul class="list-disc list-inside mb-4">
-            <li>Two players take turns selecting one of four 8x4 matrices.</li>
+            <li>Two players take turns selecting one of four 8x8 matrices.</li>
             <li>Each player selects twice (two rounds).</li>
             <li>You have 5 seconds per turn to choose a matrix.</li>
             <li>If you don't select in time, a low-entropy matrix is chosen, likely causing a loss.</li>
             <li>The goal is to maximize the entropy of your selections.</li>
+            <li>Match bottom-left and top-right triangles across rounds for a 10% bonus!</li>
             <li>The player with higher total entropy wins!</li>
         </ul>
         <p class="text-center mb-4">
@@ -117,7 +125,7 @@
         <button id="accept-button" class="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600 w-full">OK</button>
     </div>
     <div id="game" class="bg-white p-6 rounded-lg shadow-lg w-full max-w-md hidden">
-        <h1 class="text-2xl font-bold text-center mb-4">Night Security Key Creator</h1>
+        <h1 class="text-2xl font-bold text-center mb-4">Night Security Entropy Creator</h1>
         <p id="player-number" class="text-center mb-2"></p>
         <p id="status" class="text-center mb-4">Waiting for second player...</p>
         <div id="options" class="space-y-4 hidden"></div>
@@ -215,16 +223,50 @@
             document.getElementById('time-bar').classList.remove('hidden');
             timeBarFill.style.width = '100%';
             const start = Date.now();
+
+            const entropies = currentOptions.map(hex => calculateEntropy(hex));
+            const optionsDivs = document.querySelectorAll('#options .option-container');
+            optionsDivs.forEach(div => div.classList.remove('entropy-indicator'));
+
             selectionTimer = setInterval(() => {
                 const elapsed = Date.now() - start;
                 const remaining = Math.max(0, duration - elapsed);
                 const percent = (remaining / duration) * 100;
                 timeBarFill.style.width = `${percent}%`;
+
+                const secondsRemaining = Math.floor(remaining / 1000);
+                if (secondsRemaining === 4) {
+                    const minEntropyIndex = entropies.indexOf(Math.min(...entropies));
+                    optionsDivs[minEntropyIndex].classList.add('entropy-indicator');
+                } else if (secondsRemaining === 3) {
+                    const sortedEntropies = [...entropies].sort((a, b) => a - b);
+                    const secondMinEntropy = sortedEntropies[1];
+                    const secondMinIndex = entropies.indexOf(secondMinEntropy);
+                    optionsDivs[secondMinIndex].classList.add('entropy-indicator');
+                } else if (secondsRemaining < 2) {
+                    optionsDivs.forEach(div => div.classList.add('entropy-indicator', 'off'));
+                }
+
                 if (remaining <= 0) {
                     clearInterval(selectionTimer);
                     document.getElementById('time-bar').classList.add('hidden');
+                    optionsDivs.forEach(div => div.classList.remove('entropy-indicator', 'off'));
                 }
             }, 50);
+        }
+
+        function calculateEntropy(str) {
+            const freq = {};
+            for (let char of str) {
+                freq[char] = (freq[char] || 0) + 1;
+            }
+            const len = str.length;
+            let entropy = 0;
+            for (let char in freq) {
+                const p = freq[char] / len;
+                entropy -= p * Math.log2(p);
+            }
+            return entropy;
         }
 
         function generateRandomHex(bytes) {
@@ -234,8 +276,16 @@
         }
 
         function byteToRGB(byte) {
-            // Map byte value (0-255) to grayscale
-            return `rgb(${byte}, ${byte}, ${byte})`;
+            if (byte <= 84) {
+                return `rgb(${byte * 3}, 0, 0)`; // Red shades
+            } else if (byte <= 169) {
+                const r = (84 - (byte - 85)) * 3;
+                const g = (byte - 85) * 3;
+                return `rgb(${r}, ${g}, 0)`; // Yellow to green
+            } else {
+                const b = (byte - 170) * 3;
+                return `rgb(0, 255, ${b})`; // Cyan shades
+            }
         }
 
         function drawMatrixCanvas(canvas, hex, width, height) {
@@ -246,12 +296,60 @@
             for (let i = 0; i < hex.length; i += 2) {
                 bytes.push(parseInt(hex.slice(i, i + 2), 16));
             }
+            // Select 32 out of 64 pixels to fill
+            const totalPixels = width * height;
+            const pixelsToFill = 32;
+            const pixelIndices = Array.from({ length: totalPixels }, (_, i) => i);
+            // Shuffle array and take first 32 indices
+            for (let i = pixelIndices.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [pixelIndices[i], pixelIndices[j]] = [pixelIndices[j], pixelIndices[i]];
+            }
+            const filledPixels = pixelIndices.slice(0, pixelsToFill);
+            const filledPixelSet = new Set(filledPixels);
+
+            // Map bytes to the 32 filled pixels
+            const displayBytes = bytes.slice(0, pixelsToFill);
+            while (displayBytes.length < pixelsToFill) {
+                displayBytes.push(0);
+            }
+
+            // Randomly assign triangles for the filled pixels
+            const triangleAssignments = new Array(totalPixels).fill(-1);
+            for (const pixelIndex of filledPixels) {
+                triangleAssignments[pixelIndex] = Math.floor(Math.random() * 4); // 0: TL, 1: TR, 2: BL, 3: BR
+            }
+
+            let byteIndex = 0;
             for (let y = 0; y < height; y++) {
                 for (let x = 0; x < width; x++) {
-                    const byteIndex = y * width + x;
-                    const value = bytes[byteIndex];
+                    const pixelIndex = y * width + x;
+                    if (!filledPixelSet.has(pixelIndex)) continue; // Skip unfilled pixels
+
+                    const triangle = triangleAssignments[pixelIndex];
+                    ctx.beginPath();
+                    if (triangle === 0) { // Top-left triangle
+                        ctx.moveTo(x, y);
+                        ctx.lineTo(x + 1, y);
+                        ctx.lineTo(x, y + 1);
+                    } else if (triangle === 1) { // Top-right triangle
+                        ctx.moveTo(x + 1, y);
+                        ctx.lineTo(x + 1, y + 1);
+                        ctx.lineTo(x, y);
+                    } else if (triangle === 2) { // Bottom-left triangle
+                        ctx.moveTo(x, y + 1);
+                        ctx.lineTo(x + 1, y + 1);
+                        ctx.lineTo(x, y);
+                    } else { // Bottom-right triangle
+                        ctx.moveTo(x + 1, y + 1);
+                        ctx.lineTo(x, y + 1);
+                        ctx.lineTo(x + 1, y);
+                    }
+                    ctx.closePath();
+                    const value = displayBytes[byteIndex];
                     ctx.fillStyle = byteToRGB(value);
-                    ctx.fillRect(x, y, 1, 1);
+                    ctx.fill();
+                    byteIndex++;
                 }
             }
         }
@@ -268,8 +366,8 @@
                 const canvas = document.createElement('canvas');
                 canvas.className = 'option-canvas';
                 canvas.style.width = '80px';
-                canvas.style.height = '40px';
-                drawMatrixCanvas(canvas, hex, 8, 4);
+                canvas.style.height = '80px';
+                drawMatrixCanvas(canvas, hex, 8, 8);
                 optionDiv.appendChild(canvas);
 
                 optionsDiv.appendChild(optionDiv);
@@ -290,10 +388,10 @@
             const selectionDiv = document.getElementById('selection');
             const selectionText = document.getElementById('selection-text');
             const selectionCanvas = document.getElementById('selection-canvas');
-            selectionText.textContent = `Player ${playerNumber} selected (Key: ${entropy}%)`;
+            selectionText.textContent = `Player ${playerNumber} selected (Entropy: ${entropy}%)`;
             selectionCanvas.style.width = '80px';
-            selectionCanvas.style.height = '40px';
-            drawMatrixCanvas(selectionCanvas, hex, 8, 4);
+            selectionCanvas.style.height = '80px';
+            drawMatrixCanvas(selectionCanvas, hex, 8, 8);
             selectionDiv.classList.remove('hidden');
         }
 
@@ -304,8 +402,8 @@
             const finalCanvas = document.createElement('canvas');
             finalCanvas.className = 'result-canvas';
             finalCanvas.style.width = '160px';
-            finalCanvas.style.height = '80px';
-            drawMatrixCanvas(finalCanvas, finalData, 16, 8);
+            finalCanvas.style.height = '160px';
+            drawMatrixCanvas(finalCanvas, finalData, 16, 16);
             finalMatrixDiv.appendChild(finalCanvas);
 
             const playerResultsDiv = document.getElementById('player-results');
@@ -318,9 +416,9 @@
                 players[player].forEach(hex => {
                     const canvas = document.createElement('canvas');
                     canvas.className = 'option-canvas';
-                    canvas.style.width = '40px';
-                    canvas.style.height = '20px';
-                    drawMatrixCanvas(canvas, hex, 8, 4);
+                    canvas.style.width = '80px';
+                    canvas.style.height = '80px';
+                    drawMatrixCanvas(canvas, hex, 8, 8);
                     div.appendChild(canvas);
                 });
                 playerResultsDiv.appendChild(div);
@@ -330,7 +428,7 @@
             document.getElementById('status').classList.add('hidden');
             document.getElementById('result').classList.remove('hidden');
             document.getElementById('final-data').textContent = `Final 128-byte Data: ${finalData}`;
-            document.getElementById('total-entropy').textContent = `Total Key: ${totalEntropy}% of maximum`;
+            document.getElementById('total-entropy').textContent = `Total Entropy: ${totalEntropy}% of maximum`;
             document.getElementById('winner').textContent = winner;
 
             tg.sendData(JSON.stringify({
